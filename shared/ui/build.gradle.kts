@@ -21,6 +21,7 @@ kotlin {
             implementation(libs.lifecycle.runtime.compose)
             implementation(libs.koin.core)
             implementation(libs.koin.compose.viewmodel)
+            implementation(libs.ktor.client.core)
             implementation(libs.compose.ui.tooling.preview)
             implementation(libs.haze)
             implementation(libs.haze.blur)

@@ -1,0 +1,1 @@
+"""Herald Fold browser companion."""
