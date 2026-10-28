@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         // The installed identity; the Kotlin packages keep their original dev.hermeskotlin name.
-        applicationId = "dev.herald.android"
+        applicationId = "dev.herald.fold"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         // 1.2.3 → 10203: each release installs over the last, as long as the tags only go up.

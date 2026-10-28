@@ -1,3 +1,5 @@
+> **Herald Fold fork:** Adaptive chat + shared Mac Chrome workspace for foldable Android phones. See [setup and scope](docs/FOLD_SETUP.md). This fork installs separately as `dev.herald.fold`; upstream Herald and its MIT attribution remain below.
+
 <div align="center">
 
 <img src="docs/logo.svg" alt="" width="96" height="96">

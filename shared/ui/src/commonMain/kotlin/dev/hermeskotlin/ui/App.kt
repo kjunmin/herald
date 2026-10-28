@@ -45,6 +45,8 @@ import dev.hermeskotlin.ui.bots.BotFaces
 import dev.hermeskotlin.ui.bots.StartOverDialog
 import dev.hermeskotlin.ui.bots.BotsViewModel
 import dev.hermeskotlin.ui.bots.LocalBotFaces
+import dev.hermeskotlin.ui.workspace.FoldWorkspace
+import androidx.compose.ui.unit.dp
 import dev.hermeskotlin.ui.chat.ChatScreen
 import dev.hermeskotlin.ui.rooms.RoomScreen
 import dev.hermeskotlin.ui.rooms.DesktopRoomScreen
@@ -409,6 +411,7 @@ private fun Home(route: Route.Chat, app: AppViewModel, onOpenGateways: () -> Uni
 
     SidebarLayout(
         state = sidebar,
+        dockedBreakpoint = 1200.dp,
         sidebar = {
             SessionsSidebar(
                 gateway = route.gateway,
@@ -488,30 +491,32 @@ private fun Home(route: Route.Chat, app: AppViewModel, onOpenGateways: () -> Uni
                 )
                 // Rooms draw their own transcripts, each bot under its own name; only the chat has one speaker.
                 else -> ProvideReplySpeaker(speaker) {
-                    ChatScreen(
-                        target = route.target,
-                        onOpenSidebar = { scope.launch { sidebar.toggle() } },
-                        onNewChat = app::newChat,
-                        onOpenMenu = openSessionId?.let { { menuOpen = true } },
-                        onOpenChat = { id, title -> app.openSession(id, title ?: "Untitled session") },
-                        onSwitchProfile = app::switchProfile,
-                        viewModel = chat,
-                        sessionsBadge = if (alerts) sessionsBadge else SessionsBadge(),
-                        otherChatBanner = banner.takeIf { alerts && settings.otherChatsBanner && !drawerOver },
-                        onOpenOtherChat = { event: OtherChatEvent ->
-                            others.dismissBanner(event)
-                            openOther(event.chatId, event.title, event.bot)
-                        },
-                        onDismissOtherChat = others::dismissBanner,
-                        onNextChat = if (!alerts) null else fun(): Boolean {
-                            val next = others.nextChat()
-                            if (next != null) {
-                                banner?.let(others::dismissBanner)
-                                openOther(next.id, next.title, next.bot)
-                            }
-                            return next != null
-                        },
-                    )
+                    FoldWorkspace(route.gateway.url, chat) {
+                        ChatScreen(
+                            target = route.target,
+                            onOpenSidebar = { scope.launch { sidebar.toggle() } },
+                            onNewChat = app::newChat,
+                            onOpenMenu = openSessionId?.let { { menuOpen = true } },
+                            onOpenChat = { id, title -> app.openSession(id, title ?: "Untitled session") },
+                            onSwitchProfile = app::switchProfile,
+                            viewModel = chat,
+                            sessionsBadge = if (alerts) sessionsBadge else SessionsBadge(),
+                            otherChatBanner = banner.takeIf { alerts && settings.otherChatsBanner && !drawerOver },
+                            onOpenOtherChat = { event: OtherChatEvent ->
+                                others.dismissBanner(event)
+                                openOther(event.chatId, event.title, event.bot)
+                            },
+                            onDismissOtherChat = others::dismissBanner,
+                            onNextChat = if (!alerts) null else fun(): Boolean {
+                                val next = others.nextChat()
+                                if (next != null) {
+                                    banner?.let(others::dismissBanner)
+                                    openOther(next.id, next.title, next.bot)
+                                }
+                                return next != null
+                            },
+                        )
+                    }
                 }
             }
         }

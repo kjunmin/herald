@@ -15,7 +15,7 @@
             android:action="android.intent.action.VIEW"
             android:data="hermes://new-chat"
             android:targetClass="dev.hermeskotlin.android.HeraldActivity"
-            android:targetPackage="dev.herald.android" />
+            android:targetPackage="dev.herald.fold" />
     </shortcut>
     <shortcut
         android:enabled="true"
@@ -27,7 +27,7 @@
             android:action="android.intent.action.VIEW"
             android:data="hermes://new-chat-voice"
             android:targetClass="dev.hermeskotlin.android.HeraldActivity"
-            android:targetPackage="dev.herald.android" />
+            android:targetPackage="dev.herald.fold" />
     </shortcut>
     <shortcut
         android:enabled="true"
@@ -39,7 +39,7 @@
             android:action="android.intent.action.VIEW"
             android:data="hermes://voice-chat"
             android:targetClass="dev.hermeskotlin.android.HeraldActivity"
-            android:targetPackage="dev.herald.android" />
+            android:targetPackage="dev.herald.fold" />
     </shortcut>
     <!--
         Bots in the share sheet: Android offers each bot's conversation shortcut (BotShortcuts, this

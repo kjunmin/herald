@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#12141b"><title>Herald Browser</title>
+<style>
+:root{color-scheme:dark;font:15px system-ui,-apple-system,sans-serif;background:#101219;color:#f5f5f7}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:flex;flex-direction:column}.top{padding:12px;display:flex;gap:8px;align-items:center;background:#191c25;position:sticky;top:0;z-index:2}.address{flex:1;min-width:0}input,button{font:inherit;color:inherit;background:#252936;border:1px solid #383e50;border-radius:10px;padding:10px}button{cursor:pointer;white-space:nowrap}button:active{background:#3b4256}.bar{display:flex;gap:8px;padding:8px 12px;overflow:auto}.status{padding:4px 12px;color:#aeb6ca;font-size:13px}.screen{width:100%;flex:1;min-height:200px;display:grid;place-items:center;padding:8px;touch-action:pan-y}.screen img{display:block;max-width:100%;max-height:calc(100dvh - 180px);object-fit:contain;background:#1a1c23;border-radius:6px;touch-action:none}.controls{padding:8px 12px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;flex-wrap:wrap;background:#191c25}.controls input{flex:1;min-width:130px}.notice{padding:8px 12px;background:#55421c;color:#ffe7aa;font-size:13px}.hidden{display:none}@media(max-width:520px){.top{gap:5px;padding:8px}.top button{padding:9px}.screen{padding:2px}.screen img{max-height:calc(100dvh - 205px)}}
+</style></head>
+<body>
+<div class="notice">Manual browsing shares this Chrome session with Hermes. Stop the Hermes run and wait until it has stopped before using these controls. The companion cannot enforce an agent lock.</div>
+<header class="top"><input id="url" class="address" type="url" placeholder="https://example.com" inputmode="url"><button id="go">Go</button><button id="reload">↻</button></header>
+<nav class="bar"><select id="tabs" aria-label="Chrome tabs" style="flex:1;min-width:80px;background:#252936;color:inherit;border-radius:10px;padding:8px"></select><button id="new">New tab</button><button id="close">Close tab</button></nav>
+<div id="status" class="status">Connecting to Chrome…</div><main id="screen" class="screen"><img id="view" alt="Live Chrome page preview"></main>
+<footer class="controls"><button data-key="ArrowLeft">←</button><button data-key="ArrowUp">↑</button><button data-key="ArrowDown">↓</button><button data-key="ArrowRight">→</button><button data-key="Enter">Enter</button><button data-key="Backspace">⌫</button><input id="text" placeholder="Type into focused page"><button id="type">Type</button></footer>
+<script>
+(()=>{
+  const token=decodeURIComponent((location.hash.match(/(?:^#|&)token=([^&]*)/)||[])[1]||'');
+  const $=s=>document.querySelector(s),status=$('#status'),img=$('#view'),addr=$('#url');
+  if(!token){status.textContent='Pair this device by opening the URL with its #token=… fragment.';return}
+  history.replaceState(null,'',location.pathname+location.search);
+  let busy=false,active=true,lastTarget='',suppressClickUntil=0;
+  window.heraldSetActive=value=>{active=!!value;if(active)refresh()};
+  async function api(path,opts={}){
+    const response=await fetch(path,{...opts,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(opts.headers||{})}});
+    if(!response.ok){let message;try{message=(await response.json()).error}catch{message=await response.text()}throw Error(message||`HTTP ${response.status}`)}
+    return response.json()
+  }
+  async function act(op,data={}){
+    if(!active)return;
+    try{await api('/api/action',{method:'POST',body:JSON.stringify({op,target_id:lastTarget,...data})});status.textContent='Connected · stop the Hermes run and wait until it stops before manual input'}
+    catch(error){status.textContent='Action failed: '+error.message}
+  }
+  async function refresh(){
+    if(!active||busy)return;busy=true;
+    try{
+      const [shot,tabs]=await Promise.all([api('/api/screenshot'),api('/api/tabs')]);lastTarget=shot.target_id;
+      img.src='data:image/jpeg;base64,'+shot.data;
+      const select=$('#tabs');select.innerHTML='';
+      tabs.forEach(tab=>{const option=document.createElement('option');option.value=tab.id;option.textContent=(tab.title||tab.url||'New tab').slice(0,70);option.selected=tab.id===shot.target_id;select.appendChild(option)});
+      if(tabs.length)select.value=shot.target_id;
+      const current=tabs.find(tab=>tab.id===shot.target_id);
+      if(current){if(document.activeElement!==addr)addr.value=current.url||'';status.textContent=`Previewing selected tab · ${current.title||current.url||'Chrome'} · ${tabs.length} tab(s). Choose a tab to follow it.`}
+    }catch(error){status.textContent='Chrome unavailable: '+error.message}
+    finally{busy=false}
+  }
+  function contentRect(){
+    const r=img.getBoundingClientRect();if(!r.width||!r.height||!img.naturalWidth||!img.naturalHeight)return null;
+    const scale=Math.min(r.width/img.naturalWidth,r.height/img.naturalHeight),width=img.naturalWidth*scale,height=img.naturalHeight*scale;
+    return{left:r.left+(r.width-width)/2,top:r.top+(r.height-height)/2,width,height};
+  }
+  function pagePoint(event){const r=contentRect();if(!r||event.clientX<r.left||event.clientX>r.left+r.width||event.clientY<r.top||event.clientY>r.top+r.height)return null;return{x:(event.clientX-r.left)/r.width,y:(event.clientY-r.top)/r.height}}
+  img.addEventListener('click',event=>{if(Date.now()<suppressClickUntil)return;const point=pagePoint(event);if(point)act('click',point)});
+  $('#go').onclick=()=>{try{const url=new URL(addr.value);if(!['http:','https:'].includes(url.protocol))throw 0;act('navigate',{url:url.href})}catch{status.textContent='Enter a valid http(s) URL'}};
+  addr.addEventListener('keydown',event=>{if(event.key==='Enter')$('#go').click()});
+  $('#reload').onclick=()=>refresh();$('#new').onclick=()=>act('new_tab',{url:'https://www.google.com'});$('#close').onclick=()=>act('close_tab');
+  $('#tabs').onchange=event=>act('select_tab',{id:event.target.value});
+  $('#type').onclick=()=>{const field=$('#text');act('type',{text:field.value});field.value=''};
+  $('#text').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();$('#type').click()}};
+  document.querySelectorAll('[data-key]').forEach(button=>button.onclick=()=>act('key',{key:button.dataset.key}));
+  let startY=0;img.addEventListener('touchstart',event=>{startY=event.touches[0].clientY},{passive:true});
+  img.addEventListener('touchend',event=>{const delta=startY-event.changedTouches[0].clientY;if(Math.abs(delta)>25){suppressClickUntil=Date.now()+600;act('scroll',{dy:Math.max(-1,Math.min(1,delta/Math.max(1,img.getBoundingClientRect().height))),x:.5,y:.5})}},{passive:true});
+  refresh();setInterval(refresh,900);
+})();
+</script></body></html>
