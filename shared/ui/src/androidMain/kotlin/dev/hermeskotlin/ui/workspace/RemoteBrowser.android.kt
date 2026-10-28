@@ -17,12 +17,13 @@ import androidx.lifecycle.compose.currentStateAsState
 import com.composeunstyled.Text
 
 @Composable
-internal actual fun RemoteBrowser(url: String, active: Boolean, modifier: Modifier) {
+internal actual fun RemoteBrowser(url: String, active: Boolean, agentBrowsing: Boolean, modifier: Modifier) {
     var failure by remember(url) { mutableStateOf<String?>(null) }
     val origin = remember(url) { Uri.parse(url) }
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val visible = active && lifecycleState.isAtLeast(Lifecycle.State.STARTED)
     val currentActive by rememberUpdatedState(visible)
+    val currentAgentBrowsing by rememberUpdatedState(agentBrowsing)
     Box(modifier) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -41,7 +42,7 @@ internal actual fun RemoteBrowser(url: String, active: Boolean, modifier: Modifi
                         }
                         override fun onPageStarted(view: WebView, target: String?, favicon: Bitmap?) { failure = null }
                         override fun onPageFinished(view: WebView, target: String?) {
-                            view.evaluateJavascript("window.heraldSetActive?.($currentActive)", null)
+                            view.evaluateJavascript("window.heraldSetAgentBrowsing?.($currentAgentBrowsing); window.heraldSetActive?.($currentActive)", null)
                         }
                         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                             if (request.isForMainFrame) failure = "Cannot reach the Mac companion. Check its process, Wi-Fi address and port 4318. Open Connection to retry."
@@ -52,7 +53,7 @@ internal actual fun RemoteBrowser(url: String, active: Boolean, modifier: Modifi
             },
             update = {
                 if (visible) it.onResume() else it.onPause()
-                it.evaluateJavascript("window.heraldSetActive?.($visible)", null)
+                it.evaluateJavascript("window.heraldSetAgentBrowsing?.($agentBrowsing); window.heraldSetActive?.($visible)", null)
             },
             onRelease = { it.stopLoading(); it.destroy() },
         )

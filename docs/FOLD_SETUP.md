@@ -4,13 +4,14 @@ A foldable Android control plane for an existing Hermes Agent on your Mac. Based
 
 ## First version
 
-- Unfolded windows at least 720 dp wide: chat on the left, browser or activity on the right.
+- Unfolded windows at least 720 dp wide: start with full-width chat. Browser tool activity automatically reveals the browser on the right with a 450 ms resize animation. Chat or Activity stays on the left. The browser stays visible between tool calls and after completion, until hidden or the next prompt.
+- Use Chat / Activity to choose the left pane and Browser to reveal or hide the right pane. Folding and resizing keep the transcript and remote session mounted.
 - Cover screen and narrow split windows: Chat / Browser / Activity tabs, preserving the chat and remote Chrome session while switching.
 - Activity shows the same Hermes tool calls, command inputs, outputs and errors as the conversation. Commands go through Hermes and its existing permission/approval system.
-- Browser displays refreshed screenshots of a dedicated Mac Google Chrome profile. Touch clicks, typing, scrolling and tab selection control that same browser through a paired local companion.
+- Browser shows the dedicated Mac Chrome page at roughly 300 ms intervals during browser runs, following its visible tab. Controls become read-only while the agent works; manual controls return when the run finishes. Idle previews refresh roughly every 900 ms.
 - Existing Herald model/provider settings, sign-in, prompts, approvals and stop controls remain available. No new model billing integration is introduced.
 
-This is a first implementation, not a finished flight booking product. The browser preview is screenshot polling, not video. Manual browser input and agent actions can conflict: press **Stop**, wait for Hermes to finish stopping, then use the browser controls. There is no enforced takeover lock. Select the appropriate Chrome tab if the agent opens another tab. Payment and booking submission require your explicit approval; instruct Hermes accordingly. Device posture, keyboard, and touch behavior still need testing on the actual Oppo Find N5.
+This is a first implementation, not a finished flight booking product. The browser preview is screenshot polling, not video. Manual browser input and agent actions can conflict: press **Stop**, wait for Hermes to finish stopping, then use the browser controls. There is no enforced takeover lock. Follow mode observes Chrome’s visible page without changing its focus. Keep the dedicated browser window open; a hidden tab targeted by Hermes cannot be identified from this preview protocol. If multiple windows are ambiguous, the preview pauses explicitly. Screenshots show page changes, not a mouse cursor. Payment and booking submission require your explicit approval; instruct Hermes accordingly. Device posture, keyboard, and touch behavior still need testing on the actual Oppo Find N5.
 
 ## Mac setup
 

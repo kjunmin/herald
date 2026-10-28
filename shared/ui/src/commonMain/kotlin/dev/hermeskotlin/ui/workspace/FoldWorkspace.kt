@@ -1,5 +1,8 @@
 package dev.hermeskotlin.ui.workspace
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -15,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composeunstyled.Text
 import com.composeunstyled.theme.Theme
+import dev.hermeskotlin.core.chat.ChatState
 import dev.hermeskotlin.core.chat.ChatMessage
 import dev.hermeskotlin.core.storage.KeyValueStore
 import dev.hermeskotlin.designsystem.*
@@ -29,44 +33,52 @@ import org.koin.compose.koinInject
 /** Keep chat at a stable composition position across folding, resizing and pane switches. */
 @Composable
 internal fun FoldWorkspace(gateway: String, chat: ChatViewModel, content: @Composable () -> Unit) {
-    var pane by rememberSaveable { mutableStateOf("Chat") }
     val state by chat.state.collectAsStateWithLifecycle()
+    val observation = remember(state) { observeBrowser(state) }
+    var pane by rememberSaveable(gateway, state.storedSessionId) { mutableStateOf("Chat") }
+    var contentPane by rememberSaveable(gateway, state.storedSessionId) { mutableStateOf("Chat") }
+    var autoRevealed by rememberSaveable(gateway, state.storedSessionId, observation.turnKey) { mutableStateOf(false) }
+    var browserOverride by rememberSaveable(gateway, state.storedSessionId, observation.turnKey) { mutableStateOf<Boolean?>(null) }
+    // Latch until the next prompt so short gaps between tool calls never make the panes jump.
+    LaunchedEffect(observation.turnKey, observation.browsing) { if (observation.browsing) autoRevealed = true }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val availableWidth = maxWidth
         val split = splitWorkspace(availableWidth.value)
-        val selectedPane = if (split && pane == "Chat") "Browser" else pane
+        val browserShown = if (split) browserOverride ?: (pane == "Browser" || observation.browsing || autoRevealed) else pane == "Browser"
+        val browserFraction by animateFloatAsState(
+            targetValue = if (!browserShown) 0f else if (split) 0.56f else 1f,
+            animationSpec = tween(450, easing = FastOutSlowInEasing),
+            label = "Browser workspace resize",
+        )
+        val browserWidth = availableWidth * browserFraction
+        val contentWidth = availableWidth - browserWidth
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
-                .padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                (if (split) listOf("Browser", "Activity") else listOf("Chat", "Browser", "Activity")).forEach { tab ->
-                    Button(tab, { pane = tab }, size = ButtonSize.Small,
-                        variant = if (selectedPane == tab) ButtonVariant.Secondary else ButtonVariant.Ghost)
+                .padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("Chat", "Activity", "Browser").forEach { tab ->
+                    val selected = if (tab == "Browser") browserShown else contentPane == tab && (split || pane != "Browser")
+                    Button(tab, {
+                        if (tab == "Browser") {
+                            if (split) browserOverride = !browserShown else pane = "Browser"
+                        } else {
+                            contentPane = tab
+                            pane = tab
+                        }
+                    }, size = ButtonSize.Small,
+                        variant = if (selected) ButtonVariant.Secondary else ButtonVariant.Ghost)
                 }
                 Spacer(Modifier.weight(1f))
                 if (state.running) Button("Stop", chat::interrupt, size = ButtonSize.Small, variant = ButtonVariant.Danger)
             }
-            val chatWidth = if (split) availableWidth * 0.45f else if (pane == "Chat") availableWidth else 0.dp
-            Row(Modifier.weight(1f).fillMaxWidth()) {
-                Box(Modifier.width(chatWidth).fillMaxHeight().clipToBounds()) { content() }
-                Column(Modifier.weight(1f).fillMaxHeight().clipToBounds().background(Theme[colors][surface2])) {
-                    // Both remain composed: hiding a pane never clears chat or the browser session.
-                    Box(Modifier.fillMaxWidth().weight(if (pane != "Activity") 1f else 0.0001f)) {
-                        BrowserPane(gateway, active = pane != "Activity" && (split || pane == "Browser"))
-                    }
-                    if (pane == "Activity") {
-                        val tools = state.messages.filterIsInstance<ChatMessage.Assistant>().flatMap { it.tools }
-                        LazyColumn(Modifier.weight(1f).padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            item { Text("Command and browser activity", color = Theme[colors][text]) }
-                            if (tools.isEmpty()) item { Text("Ask Hermes to research a flight or run a command. Tool calls and their results appear here.", color = Theme[colors][textSecondary]) }
-                            items(tools.asReversed()) { tool ->
-                                Column(Modifier.fillMaxWidth().background(Theme[colors][surface3]).padding(12.dp)) {
-                                    Text("${if (tool.running) "Running" else if (tool.failed) "Failed" else "Finished"} · ${tool.name}", color = Theme[colors][text])
-                                    tool.input?.let { Text(it.take(8000), color = Theme[colors][textSecondary]) }
-                                    (tool.output ?: tool.summary ?: tool.detail)?.let { Text(it.take(16000), color = Theme[colors][textSecondary]) }
-                                }
-                            }
-                        }
-                    }
+            Row(Modifier.weight(1f).fillMaxWidth().clipToBounds()
+                .consumeWindowInsets(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
+                // Stable slots retain transcript scroll and WebView state throughout folding and animation.
+                Box(Modifier.width(if (contentPane == "Chat") contentWidth else 0.dp).fillMaxHeight().clipToBounds()) { content() }
+                Box(Modifier.width(if (contentPane == "Activity") contentWidth else 0.dp).fillMaxHeight().clipToBounds()) { ActivityPane(state) }
+                Box(Modifier.width(browserWidth).fillMaxHeight().clipToBounds().background(Theme[colors][surface2])) {
+                    BrowserPane(gateway, active = browserShown && browserFraction > 0.01f,
+                        agentBrowsing = observation.browsing,
+                        currentAction = observation.tools.lastOrNull { it.running && isBrowserTool(it.name) }?.let { it.detail ?: it.name })
                 }
             }
         }
@@ -74,7 +86,23 @@ internal fun FoldWorkspace(gateway: String, chat: ChatViewModel, content: @Compo
 }
 
 @Composable
-private fun BrowserPane(gateway: String, active: Boolean) {
+private fun ActivityPane(state: ChatState) {
+    val tools = state.messages.filterIsInstance<ChatMessage.Assistant>().flatMap { it.tools }
+    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("Command and browser activity", color = Theme[colors][text]) }
+        if (tools.isEmpty()) item { Text("Ask Hermes to research a flight or run a command. Tool calls and their results appear here.", color = Theme[colors][textSecondary]) }
+        items(tools.asReversed()) { tool ->
+            Column(Modifier.fillMaxWidth().background(Theme[colors][surface3]).padding(12.dp)) {
+                Text("${if (tool.running) "Running" else if (tool.failed) "Failed" else "Finished"} · ${tool.name}", color = Theme[colors][text])
+                tool.input?.let { Text(it.take(8000), color = Theme[colors][textSecondary]) }
+                (tool.output ?: tool.summary ?: tool.detail)?.let { Text(it.take(16000), color = Theme[colors][textSecondary]) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrowserPane(gateway: String, active: Boolean, agentBrowsing: Boolean, currentAction: String?) {
     val store = koinInject<KeyValueStore>()
     val scope = rememberCoroutineScope()
     val key = "fold.companion.$gateway"
@@ -85,7 +113,10 @@ private fun BrowserPane(gateway: String, active: Boolean) {
     LaunchedEffect(key) { url = store.get(key)?.takeIf(::validCompanionUrl) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Mac Chrome", modifier = Modifier.weight(1f), color = Theme[colors][text])
+            Column(Modifier.weight(1f)) {
+                Text(if (agentBrowsing) "Agent browsing" else "Mac Chrome", color = Theme[colors][text])
+                currentAction?.let { Text(it, color = Theme[colors][textSecondary], maxLines = 2) }
+            }
             Button(if (url == null) "Connect" else "Connection", { editing = !editing }, size = ButtonSize.Small, variant = ButtonVariant.Ghost)
         }
         if (url == null || editing) Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -108,6 +139,6 @@ private fun BrowserPane(gateway: String, active: Boolean) {
                 scope.launch { store.remove(key); url = null; editing = false }
             }, variant = ButtonVariant.Ghost)
         }
-        url?.takeIf { !editing }?.let { key(it) { RemoteBrowser(it, active, Modifier.weight(1f).fillMaxWidth()) } }
+        url?.takeIf { !editing }?.let { key(it) { RemoteBrowser(it, active, agentBrowsing, Modifier.weight(1f).fillMaxWidth()) } }
     }
 }

@@ -174,18 +174,70 @@ class CDP:
             self.session = ClientSession()
 
     async def select(self, target: str):
-        tabs = await self.tabs()
-        if target not in {t.get("id") for t in tabs if t.get("type") == "page"}:
-            raise web.HTTPBadRequest(text="Unknown Chrome tab")
-        if self.session_id and self.ws and not self.ws.closed:
+        # HTTP /json/list can briefly lag tab creation/closure; validate against CDP itself.
+        try:
+            info = await self.call("Target.getTargetInfo", {"targetId": target})
+            if info.get("targetInfo", {}).get("type") != "page":
+                raise web.HTTPBadRequest(text="Unknown Chrome page")
+            result = await self.call("Target.attachToTarget", {"targetId": target, "flatten": True})
+            new_sid = result["sessionId"]
+        except RuntimeError:
+            raise web.HTTPBadRequest(text="Chrome tab closed. Refresh and choose another tab.") from None
+        old_sid = self.session_id
+        self.target_id, self.session_id = target, new_sid
+        await self.call("Target.activateTarget", {"targetId": target})
+        if old_sid and old_sid != new_sid:
             try:
-                await self.call("Target.detachFromTarget", {"sessionId": self.session_id})
+                await self.call("Target.detachFromTarget", {"sessionId": old_sid})
             except Exception:
                 pass
-        self.target_id = target
-        result = await self.call("Target.attachToTarget", {"targetId": target, "flatten": True})
-        self.session_id = result["sessionId"]
-        await self.call("Target.activateTarget", {"targetId": target})
+
+    async def follow_visible_page(self):
+        """Observe the visible Chrome page without moving browser focus or guessing among windows."""
+        tabs = [t for t in await self.tabs() if t.get("type") == "page"]
+        candidates = []
+        selected_sid = None
+        attached_sessions = []
+        try:
+            for tab in tabs:
+                target = tab.get("id")
+                if not target:
+                    continue
+                try:
+                    attached = await self.call("Target.attachToTarget", {"targetId": target, "flatten": True})
+                    sid = attached["sessionId"]
+                    attached_sessions.append(sid)
+                    state = await self.call("Runtime.evaluate", {
+                        "expression": "({visibility:document.visibilityState,focus:document.hasFocus()})",
+                        "returnByValue": True,
+                    }, sid)
+                    # CDP.call already unwraps the outer protocol result envelope.
+                    value = state.get("result", {}).get("value", {})
+                    if value.get("visibility") == "visible":
+                        candidates.append((tab, sid, value.get("focus") is True))
+                except Exception:
+                    # A renderer may close during inspection; do not activate it to recover.
+                    continue
+            focused = [candidate for candidate in candidates if candidate[2]]
+            choices = focused if focused else candidates
+            if len(choices) != 1:
+                raise RuntimeError("Cannot identify one visible Chrome page. Keep the agent's dedicated Chrome window open, or select a tab manually after stopping the run.")
+            tab, selected_sid, _ = choices[0]
+            old_sid = self.session_id
+            self.target_id, self.session_id = tab["id"], selected_sid
+            if old_sid and old_sid != selected_sid:
+                try:
+                    await self.call("Target.detachFromTarget", {"sessionId": old_sid})
+                except Exception:
+                    pass
+            return tab
+        finally:
+            for unused_sid in attached_sessions:
+                if unused_sid != selected_sid:
+                    try:
+                        await self.call("Target.detachFromTarget", {"sessionId": unused_sid})
+                    except Exception:
+                        pass
 
     async def close(self):
         if self.reader:
@@ -234,11 +286,14 @@ async def screenshot(request):
     cdp: CDP = request.app[CDP_KEY]
     async with cdp.operation_lock:
         await cdp.ensure()
+        followed = request.query.get("follow") == "1"
+        if followed:
+            await cdp.follow_visible_page()
         target_id = cdp.target_id
         result = await cdp.call("Page.captureScreenshot", {"format": "jpeg", "quality": 68, "captureBeyondViewport": False}, cdp.session_id)
         metrics = await cdp.call("Page.getLayoutMetrics", {}, cdp.session_id)
         viewport = metrics.get("cssVisualViewport") or metrics.get("cssLayoutViewport") or {}
-        return web.json_response({"data": result["data"], "target_id": target_id,
+        return web.json_response({"data": result["data"], "target_id": target_id, "followed": followed,
                                   "viewport": {"width": viewport.get("clientWidth", 0), "height": viewport.get("clientHeight", 0)},
                                   "at": time.time()})
 
@@ -283,8 +338,13 @@ async def _action_locked(request):
         # Chrome may list a closing renderer briefly after acknowledging closeTarget.
         cdp.session_id = ""
         pages = [t for t in await cdp.tabs() if t.get("type") == "page" and t.get("id") != closed_target]
-        if pages:
-            await cdp.select(pages[0]["id"])
+        for page in pages:
+            try:
+                await cdp.select(page["id"])
+                break
+            except web.HTTPBadRequest:
+                # Another tab can be closing too; skip stale HTTP discovery rows.
+                continue
         else:
             result = await cdp.call("Target.createTarget", {"url": "about:blank"})
             await cdp.select(result["targetId"])

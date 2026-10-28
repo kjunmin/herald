@@ -28,7 +28,7 @@ browser:
   cdp_url: "http://127.0.0.1:9222"
 ```
 
-On the Mac host, Hermes can connect to the isolated Chrome instance at that URL. The companion's preview and Hermes then operate on the same tabs. The companion UI screenshot is polled about once per second; it is not a video stream. Pause the Hermes agent before manual input. The companion cannot enforce or guarantee that the agent is idle, so concurrent manual input may conflict with agent actions.
+On the Mac host, Hermes can connect to the isolated Chrome instance at that URL. The companion's preview and Hermes then operate on the same tabs. During an agent run, the Android app calls `window.heraldSetAgentBrowsing(true)`: the companion follows the visible Chrome page, preferring the focused window. A single visible page can still be followed when Mac focus is in another app. Ambiguous windows pause the preview rather than selecting an arbitrary page. It refreshes about every 300 ms, and disables browser controls. When the run ends, `window.heraldSetAgentBrowsing(false)` restores the normal preview interval. Outside an agent run, use **Follow Chrome** to follow the visible page or choose a tab manually. A hidden page is never activated just to inspect it. The companion cannot identify which page Hermes is targeting if Hermes operates on a background tab, so the preview indicates the visible Chrome page rather than claiming it is always the agent's exact target. Screenshots do not show the mouse cursor.
 
 ## Flight research prompt
 
@@ -36,4 +36,4 @@ Use a prompt such as: “Research flights for my dates and airports. Compare sch
 
 ## Scope
 
-The first version offers preview, address navigation, tab selection/open/close, click, basic keys, text entry, and scrolling. It restricts navigation to `http` and `https`. The preview stays on the selected tab; choose another tab in the picker to follow it. CDP does not expose a dependable active-tab signal to this companion. This is a trusted-LAN convenience service, not an internet-facing remote browser product. Keep the pairing token private and use a trusted network. No automated purchase flow is included.
+The first version offers preview, address navigation, tab selection/open/close, click, basic keys, text entry, and scrolling. It restricts navigation to `http` and `https`. Follow mode uses page visibility and focus state to identify Chrome's visible page without activating background tabs. This is a trusted-LAN convenience service, not an internet-facing remote browser product. Keep the pairing token private and use a trusted network. No automated purchase flow is included.
